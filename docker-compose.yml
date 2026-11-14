@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: resqnet
+      POSTGRES_USER: resqnet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-LocalOnly-Database-2026!}
+    volumes: ["resqnet-postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resqnet -d resqnet"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["127.0.0.1:6379:6379"]
+    volumes: ["resqnet-redis:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  kafka:
+    image: apache/kafka:3.9.0
+    hostname: kafka
+    ports: ["127.0.0.1:9092:9092", "127.0.0.1:9093:9093"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: EXTERNAL://:9092,INTERNAL://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9092,INTERNAL://kafka:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+  api:
+    build: ./backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/resqnet
+      SPRING_DATASOURCE_USERNAME: resqnet
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-LocalOnly-Database-2026!}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      RESQNET_HOSPITAL_ADMIN_USERNAME: ${RESQNET_HOSPITAL_ADMIN_USERNAME:-admin}
+      RESQNET_HOSPITAL_ADMIN_PASSWORD: ${RESQNET_HOSPITAL_ADMIN_PASSWORD:-password}
+      RESQNET_PARAMEDIC_USERNAME: ${RESQNET_PARAMEDIC_USERNAME:-admin}
+      RESQNET_PARAMEDIC_PASSWORD: ${RESQNET_PARAMEDIC_PASSWORD:-password}
+      RESQNET_ROUTING_BASE_URL: ${RESQNET_ROUTING_BASE_URL:-https://router.project-osrm.org}
+      RESQNET_ALLOWED_ORIGINS: ${RESQNET_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      RESQNET_DEMO_AUTO_START: ${RESQNET_DEMO_AUTO_START:-true}
+    ports: ["127.0.0.1:8081:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+
+volumes:
+  resqnet-postgres:
+  resqnet-redis:
